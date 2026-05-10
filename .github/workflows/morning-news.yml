@@ -19,7 +19,19 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Stop after three trial mornings
+        id: trial_window
+        run: |
+          jst_today=$(TZ=Asia/Tokyo date +%F)
+          if [ "$jst_today" \> "2026-05-13" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Trial window ended on 2026-05-13 JST."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Generate and post drafts
+        if: steps.trial_window.outputs.run == 'true'
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
