@@ -9,6 +9,7 @@ import email.utils
 import html
 import json
 import os
+import time
 import textwrap
 import urllib.error
 import urllib.parse
@@ -60,7 +61,13 @@ class NewsItem:
     published: str
 
 
-def fetch_url(url: str, *, data: bytes | None = None, headers: dict[str, str] | None = None) -> bytes:
+def fetch_url(
+    url: str,
+    *,
+    data: bytes | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: int = 30,
+) -> bytes:
     request = urllib.request.Request(
         url,
         data=data,
@@ -69,8 +76,28 @@ def fetch_url(url: str, *, data: bytes | None = None, headers: dict[str, str] | 
             **(headers or {}),
         },
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.read()
+
+
+def fetch_url_with_retries(
+    url: str,
+    *,
+    data: bytes | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: int = 30,
+    attempts: int = 3,
+) -> bytes:
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return fetch_url(url, data=data, headers=headers, timeout=timeout)
+        except (TimeoutError, urllib.error.URLError) as exc:
+            last_error = exc
+            if attempt == attempts:
+                break
+            time.sleep(2 * attempt)
+    raise RuntimeError(f"Request failed after {attempts} attempts: {last_error}") from last_error
 
 
 def google_news_url(query: str) -> str:
@@ -200,13 +227,16 @@ def generate_with_openai(prompt: str) -> str:
         "instructions": "あなたは心理学と行動心理学に詳しい日本語SNS編集者です。ニュース事実を尊重し、短く濃いXスレッド案を作ります。",
     }
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    response = fetch_url(
+    timeout = int(os.environ.get("OPENAI_TIMEOUT_SECONDS", "180"))
+    response = fetch_url_with_retries(
         "https://api.openai.com/v1/responses",
         data=data,
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         },
+        timeout=timeout,
+        attempts=2,
     )
     parsed = json.loads(response.decode("utf-8"))
     text = parsed.get("output_text")
